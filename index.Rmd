@@ -1,0 +1,146 @@
+---
+title: "Machine Learning Project"
+author: "Dave Ingram"
+date: "January 25, 2015"
+output: html_document
+---
+
+# Executive Summary
+
+The goal of this project is to predict the manner in which participants performed a particular excercise. Participants were asked to perform barbell lifts correctly and incorrectly in 5 different ways, and the results were measured using data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants.
+
+Multiple prediction models were evaluated, including Boosting,
+Classification Trees and Random Forrests. The in-sample and out-of-sample error
+rate was then calculated for cross validation and the best model chosen.
+
+The most effective model was a Random Forrests model with an out-of-sample cross validation estimate of 98.9%.
+
+# Data Processing
+
+In order to build the model, the training data was split into a training set
+of 75% and a test set of %25 of the original data. The training set was again
+split to have a smaller exploration set due to computational complexity of several models. We also loaded the 20 value test set as a validation set.
+
+```{r setup, cache=TRUE, echo=FALSE}
+library(caret)
+set.seed(12345)
+
+# Read in all the data
+data <- read.csv("./data/pml-training.csv")
+validation <- read.csv("./data/pml-testing.csv")
+
+# Create a new test and train set for model building
+inTrain <- createDataPartition(data$classe, p = .75, list = FALSE)
+training <- data[inTrain,]
+testing <- data[-inTrain,]
+```
+
+# Pre-processing and exploration
+
+The first thing of interest is winnowing out variables of the 160 in the set
+that are of no use for prediction. We do this by first removing the variables
+with Near Zero Variance, then also removing the "X" variable which is unique 
+per row. It was also expected that the timestamp variables are uncorrelated 
+with class, but this was verified prior to removing these
+from the predictors. Finally, a smaller dataset was sampled from the training
+set for computational ease when exploring the data relationships further.
+
+```{r useful vars, echo=F, cache=T}
+nzv <- nearZeroVar(training)
+training <- training[,-nzv]
+# remove the X and user_name variables
+training <- training[,-1]
+training <- training[,-1]
+
+timestamps <- grep("timestamp", names(training))
+training <- training[,-timestamps]
+
+#Finally, removing variables with NA values
+completeFeatures = complete.cases(t(training))
+training <- training[,completeFeatures]
+
+# Perform the same transformations on the testing set
+testing <- testing[,-nzv]
+# remove the X and user_name variables
+testing <- testing[,-1]
+testing <- testing[,-1]
+testing <- testing[,-timestamps]
+testing <- testing[,completeFeatures]
+
+inExplore <- createDataPartition(training$classe, p = .3, list=F)
+explore <- training[inExplore,]
+```
+
+Given the large number of potential features, a number of exploratory techniques
+were considered. The predictors included a wide range of numeric, integer and 
+factor variables, making a simple principal component analysis more challenging.
+Therefore, we first isolate only the numeric predictors, then run a principal
+component analysis on those.
+
+```{r pca, echo=T, cache=T}
+numericCols <- data.frame(classe = explore$classe)
+names <- "classe"
+for(i in 1:length(explore[1,])) {
+    if(class(explore[,i]) == "numeric") {
+        numericCols <- data.frame(numericCols, explore[,i])
+        names <- c(names, names(explore)[i])
+    }
+}
+colnames(numericCols) <- names
+#pcaModel = train(classe ~ ., data=numericCols, preProcess=c('pca'), thresh=.8)
+
+# Generate a model with 2 principal coponents
+pcaModel2 = preProcess(numericCols[,-1], method=c('pca'), pcaComp = 2)
+pcs <- predict(pcaModel2, numericCols[,-1])
+qplot(PC1, PC2, data=pcs, color=explore$classe)
+```
+
+Initial exploration of using principal components did not yield a strong 
+relationship with prediction, so latter models are built without using pca.
+
+```{r CART, echo=TRUE, cache=TRUE}
+library(rattle)
+library(rpart)
+
+treeFit <- train(classe ~ ., data=training, method="rpart")
+fancyRpartPlot(treeFit$finalModel)
+```
+
+The final model in this classification tree generated a 58% accuracy and
+highlighted several very useful variables for prediction.
+
+# Model Selection and Cross Validation
+
+```{r random forrest, echo=TRUE, cache=T}
+rfFit <- train(classe ~., data=explore, method="rf")
+#confusionMatrix(predict(modelFit, testing), testing$classe)
+rfFit$results
+```
+
+```{r random forrest matrix, echo=T, cache=TRUE}
+confusionMatrix(predict(rfFit, testing), testing$classe)
+```
+
+Using this Random Forrest algorithm on the explore data set yielded a 96% in-sample accuracy, and an accuracy of 98.9% for out-of-sample accuracy, cross
+validated using the confusionMatrix function.
+
+This model was further compared with a boosting algorithm.
+
+```{r boosting, echo=T, cache=T}
+gbmFit <- train(classe ~., data=explore, method="gbm", verbose=F)
+gbmFit$results
+confusionMatrix(predict(gbmFit, testing), testing$classe)
+```
+
+Boosting also performed quite well, yielding a 97.3% accuracy on out-of-sample
+prediction. 
+
+# Summary
+
+While over half of the possible features were found to be either incomplete
+or not useful for prediction, we were able to build a prediction algorithm
+with over 98.9% accuracy. Of the models tested, a Random Forrest algorithm
+proved to be the most useful. Using a simple classification tree, we also
+learned that a much smaller number of variables had the highest predictive
+value, which may be valuable for future applications which may wish to collect
+a smaller number of features.

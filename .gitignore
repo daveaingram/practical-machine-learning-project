@@ -9,3 +9,6 @@
 
 # RStudio files
 .Rproj.user/
+
+# caches
+index_cache
